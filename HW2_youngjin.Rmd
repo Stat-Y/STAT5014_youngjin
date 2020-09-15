@@ -1,0 +1,486 @@
+---
+title: "Homework 2"
+author: "Youngjin Cho"
+date: '2020 9 13 '
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+library(data.table)
+library(tidyverse)
+```
+
+# Problem 1
+I took "Work with Data" and "Tidy Your Data" in Primers. 
+
+# Problem 2
+I saved this file as HW2_youngjin.
+
+# Problem 3
+Virsion Control is important in my future work. If I do not use Virsion Control, when I make mistake, I might not find when the mistake happened. 
+
+# Problem 4
+
+## (a) Sensory Data
+
+```{r Sensory import, coche=FALSE}
+## Sensory Import
+url_Sensory <- "http://www2.isye.gatech.edu/~jeffwu/wuhamadabook/data/Sensory.dat"
+Sensory_raw <- fread(url_Sensory, fill=TRUE, data.table = FALSE, skip=1)
+knitr::kable(head(Sensory_raw))
+```
+
+I imported data from the url. I see the data is kind of uncleaned. We cannot directly use the data because some rows have values in item but the other rows have no values in item, which makes the whole data mess, i.e., some data is located in one column left from its original location. We should fix this problem by cleaning the data. 
+
+### Using Basic R Functions
+
+```{r}
+## Sensory data : old school : index data frame
+Sensory_old_school <- Sensory_raw
+Sorthelper <- data.frame(1:length(Sensory_old_school[,6]),as.numeric(is.na(Sensory_old_school[,6])))
+colnames(Sorthelper) <- c("index", "NA")
+head(Sorthelper)
+```
+
+First, we can use kind of old school way, which do not use tidyverse. We make index data frame that indicates the rows that have NA value in last column of the data. If ith row has NA value in its last column in the original data, the ith row and second column of Sorthelper will become 1, otherwise 0.
+
+```{r}
+## Sensory data : old school : data cleaning with index
+Sensory_old_school[Sorthelper[Sorthelper[,2]==1,][,1],2:6] <- 
+  Sensory_old_school[Sorthelper[Sorthelper[,2]==1,][,1],1:5]
+Sensory_old_school <- Sensory_old_school[,-1]
+colnames(Sensory_old_school) <- paste("Operator",1:5)
+knitr::kable(head(Sensory_old_school))
+```
+
+By using Sorthelper as index, we can sort our data which has NA in last column and push these rows to the right by one column. Then we can get cleaned data!
+
+### Using Tidyverse
+
+```{r}
+## Sensory data : tidyverse : dividing data
+Sensory_new <- cbind(1:length(Sensory_raw[,6]),Sensory_raw)
+colnames(Sensory_new) <- c("number_key","trash",paste("Operator", 1:5))
+
+Sensory_A <- Sensory_new %>% 
+  subset(is.na(Sensory_new[,7]))
+
+Sensory_B <- Sensory_new %>% 
+  subset(Sensory_new[,7]>0)
+
+Sensory_A <- Sensory_A[,-7]
+Sensory_B <- Sensory_B[,-2]
+```
+
+I used subset function in tidyverse to clean data. First, I divided data into two parts, one is Sensory_A, the rows have NA values in last column, and the other is Sensory_B, the rows do not have NA values in last column. I cleaned these two data independently. Now we can combine them together.
+
+```{r}
+## Sensory data : tidyverse : combining data
+colnames(Sensory_A) <- colnames(Sensory_B)
+Sensory_new <- rbind(Sensory_A,Sensory_B)
+Sensory_new <- Sensory_new %>% 
+  arrange(number_key) %>% 
+  select(-1)
+knitr::kable(head(Sensory_new))
+```
+
+I combined two data and arranged in original order by using number_key column. It is the same as the result using old school way!
+
+### Data Description
+
+```{r}
+## Sensory data : summary
+knitr::kable(summary(Sensory_new))
+```
+
+```{r}
+## Sensory data : histogram and boxplot
+par(mfrow=c(2,5))
+hist(Sensory_new[,1],main="Operator 1", xlab="Sensory")
+hist(Sensory_new[,2],main="Operator 2", xlab="Sensory")
+hist(Sensory_new[,3],main="Operator 3", xlab="Sensory")
+hist(Sensory_new[,4],main="Operator 4", xlab="Sensory")
+hist(Sensory_new[,5],main="Operator 5", xlab="Sensory")
+boxplot(Sensory_new[,1],main="Operator 1", ylab="Sensory")
+boxplot(Sensory_new[,2],main="Operator 2", ylab="Sensory")
+boxplot(Sensory_new[,3],main="Operator 3", ylab="Sensory")
+boxplot(Sensory_new[,4],main="Operator 4", ylab="Sensory")
+boxplot(Sensory_new[,5],main="Operator 5", ylab="Sensory")
+```
+
+I summarized the Sensory data and plotted histogram and boxplot. No special issue was found.
+
+## (b) Long Jump Data
+
+```{r Longjump import, coche=FALSE}
+## Long Jump import
+url_Longjump <- "http://www2.isye.gatech.edu/~jeffwu/wuhamadabook/data/LongJumpData.dat"
+Longjump_raw <- fread(url_Longjump)
+knitr::kable(head(Longjump_raw))
+```
+
+I imported data from the url. I see the data is kind of uncleaned. We cannot directly use the data because columns with same characteristics are repeated, i.e., year and record columns are repeated. Also, in later columns, the value for year and record are NA values. We should fix this problem by cleaning the data.
+
+### Using Basic R Functions
+
+```{r}
+## Long Jump data : old school : Vectorization-Matrix form-Data Frame
+Longjump_old_school <- as.matrix(Longjump_raw)
+Longjump_old_school <- as.vector(t(Longjump_old_school))
+Longjump_old_school <- matrix(Longjump_old_school,2,length(Longjump_old_school)/2)
+Longjump_old_school <- as.data.frame(t(Longjump_old_school))
+head(Longjump_old_school)
+```
+
+First, I vectorized the data by as.vector function and made 2 by 22 matrix with it and transformed it to data frame.
+
+```{r}
+## Long Jump data : old school : data cleaning with index
+Sorthelper_2 <- data.frame(1:length(Longjump_old_school[,2]),1-as.numeric(is.na(Longjump_old_school[,2])))
+colnames(Sorthelper_2) <- c("index", "non NA")
+
+Longjump_old_school <- Longjump_old_school[Sorthelper_2[Sorthelper_2[,2]==1,][,1],]
+Longjump_old_school[,1] <- Longjump_old_school[,1]+1900
+Longjump_old_school=Longjump_old_school[order(Longjump_old_school[,1]),]
+
+rownames(Longjump_old_school) <- 1:dim(Longjump_old_school)[1]
+colnames(Longjump_old_school) <- c("Year", "Record")
+
+knitr::kable(head(Longjump_old_school))
+```
+
+Second, similar to Sensory data cleaning, I made index matrix (Sorthelper_2) to make indices of rows with no NA values. I filtered the data with this index and added 1900 to the year column to show year properly. Then we can get cleaned data!
+
+### Using Tidyverse
+
+```{r}
+## Long Jump data : tidyverse : Vectorization -> Matrix form -> Data Frame
+Longjump_new <- as.matrix(Longjump_raw)
+Longjump_new <- as.vector(t(Longjump_new))
+Longjump_new <- matrix(Longjump_new,2,length(Longjump_new)/2)
+Longjump_new <- as.data.frame(t(Longjump_new))
+head(Longjump_new)
+```
+
+Now we use tidyverse. The first step is same as old school, which I vectorized the data by as.vector function and made 2 by 22 matrix with it and transformed it to data frame. 
+
+```{r}
+## Long Jump data : tidyverse : Vectorization -> Matrix form -> Data Frame
+Longjump_new <- Longjump_new %>% 
+  subset(Longjump_new[,2]>0)
+
+Longjump_new$V1 <- Longjump_new$V1+1900
+
+rownames(Longjump_new) <- 1:dim(Longjump_new)[1]
+colnames(Longjump_new) <- c("Year", "Record")
+
+Longjump_new <- Longjump_new %>% 
+  arrange(Year)
+knitr::kable(head(Longjump_new))
+```
+
+I used subset function in tidyverse to get the rows without NA values. I added 1900 to the year column to show year properly. Then we can get cleaned data! It is same as the result in old school way.
+
+### Data Description
+
+```{r}
+## Long Jump data : summary
+knitr::kable(summary(Longjump_new))
+```
+
+```{r, fig.height=3, fig.width=3}
+## Long Jump data : histogram and boxplot
+par(mfrow=c(1,1))
+hist(Longjump_new[,2],main="Long Jump Record", xlab="meter")
+boxplot(Longjump_new[,2],main="Long Jump Record", ylab="meter")
+```
+
+```{r, fig.height=3, fig.width=3}
+## Long Jump data : year vs record
+par(mfrow=c(1,1))
+plot(Longjump_new[,1],Longjump_new[,2],main="Long Jump Record", xlab="year", ylab="meter", type="l")
+```
+
+I summarized the Long Jump data and plotted histogram, boxplot, and year versus record plot. The record improves as the year passes. There were no special issues for the data.
+
+## (c) Brain Body Data
+
+```{r Brain Body import, coche=FALSE}
+## Brain Body import
+url_Brain <- "http://www2.isye.gatech.edu/~jeffwu/wuhamadabook/data/BrainandBodyWeight.dat"
+Brain_raw <- fread(url_Brain)
+knitr::kable(head(Brain_raw))
+```
+
+I imported data from the url. It is actually the same problem as cleaning the Long Jump Record data. We cannot directly use the data because columns with same characteristics are repeated, i.e., Brain weight and Body weight columns are repeated. Also, in later columns, the value for year and record are NA values. We should fix this problem by cleaning the data.
+
+### Using Basic R Functions
+
+```{r}
+## Brain Body data : old school : Vectorization -> Matrix form -> Data Frame
+Brain_old_school <- as.matrix(Brain_raw)
+Brain_old_school <- as.vector(t(Brain_old_school))
+Brain_old_school <- matrix(Brain_old_school,2,length(Brain_old_school)/2)
+Brain_old_school <- as.data.frame(t(Brain_old_school))
+head(Brain_old_school)
+```
+
+First, I vectorized the data by as.vector function and made 2 by 62 matrix with it and transformed it to data frame.
+
+```{r}
+## Brain Body data : old school : data cleaning with index
+Sorthelper_3 <- data.frame(1:length(Brain_old_school[,2]),1-as.numeric(is.na(Brain_old_school[,2])))
+Brain_old_school <- Brain_old_school[Sorthelper_3[Sorthelper_3[,2]==1,][,1],]
+
+rownames(Brain_old_school) <- 1:dim(Brain_old_school)[1]
+colnames(Brain_old_school) <- c("Brain weight (g)", "Body weight (kg)")
+
+knitr::kable(head(Brain_old_school))
+```
+
+Second, similar to Sensory data cleaning, I made index matrix (Sorthelper_3) to make indices of rows with no NA values. I filtered the data with this index and we can get cleaned data!
+
+### Using Tidyverse
+
+```{r}
+## Brain Body data : tidyverse : Vectorization -> Matrix form -> Data Frame
+Brain_new <- as.matrix(Brain_raw)
+Brain_new <- as.vector(t(Brain_new))
+Brain_new <- matrix(Brain_new,2,length(Brain_new)/2)
+Brain_new <- as.data.frame(t(Brain_new))
+head(Brain_new)
+```
+
+Now we use tidyverse. The first step is same as old school, which I vectorized the data by as.vector function and made 2 by 62 matrix with it and transformed it to data frame. 
+
+```{r}
+## Brain Body data : tidyverse : data cleaning with index
+Brain_new <- Brain_new %>% 
+  subset(Brain_new[,2]>0)
+
+colnames(Brain_new) <- c("Brain weight (g)", "Body weight (kg)")
+rownames(Brain_new) <- 1:dim(Brain_new)[1]
+
+knitr::kable(head(Brain_new))
+```
+
+I used subset function in tidyverse to get the rows without NA value and we can get cleaned data! It is same as the result in old school way.
+
+### Data Description
+
+```{r}
+## Brain Body data : summary
+knitr::kable(summary(Brain_new))
+```
+
+```{r}
+## Brain Body data : histogram and boxplot
+par(mfrow=c(2,3))
+hist(Brain_new[,1],main="Brain", xlab="Brain Weight (g)")
+hist(Brain_new[,2],main="Body", xlab="Body Weight (kg)")
+hist(0.001*Brain_new[,1]/Brain_new[,2],main="Brain/Body", xlab="Ratio")
+boxplot(Brain_new[,1],main="Brain", ylab="Brain Weight (g)")
+boxplot(Brain_new[,2],main="Body", ylab="Body Weight (kg)")
+boxplot(0.001*Brain_new[,1]/Brain_new[,2],main="Brain/Body", ylab="Ratio")
+```
+
+I made summary, histogram, and boxplot for the data. Looks like there is an outlier.
+
+```{r}
+## Outlier elimination
+Brain_new_outlier_eliminated <- Brain_new %>% 
+  subset(Brain_new[,1]<300 & Brain_new[,2]<600)
+```
+
+Eliminated observations that have brains weight more or equal to 300 g or bodies weight more or equal to 600 kg.
+
+```{r}
+## Brain Body data : histogram and boxplot after outlier elimation
+par(mfrow=c(2,3))
+hist(Brain_new_outlier_eliminated[,1],main="Brain", xlab="Brain Weight (g)")
+hist(Brain_new_outlier_eliminated[,2],main="Body", xlab="Body Weight (kg)")
+hist(0.001*Brain_new_outlier_eliminated[,1]/Brain_new_outlier_eliminated[,2],main="Brain/Body", xlab="Ratio")
+boxplot(Brain_new_outlier_eliminated[,1],main="Brain", ylab="Brain Weight (g)")
+boxplot(Brain_new_outlier_eliminated[,2],main="Body", ylab="Body Weight (kg)")
+boxplot(0.001*Brain_new_outlier_eliminated[,1]/Brain_new_outlier_eliminated[,2],main="Brain/Body", ylab="Ratio")
+```
+
+```{r, fig.height=3, fig.width=3}
+## Brain Body data : brain vs body plot after outlier elimation
+plot(Brain_new_outlier_eliminated[,1],Brain_new_outlier_eliminated[,2],main="Brain vs Body", xlab="Brain Weight (g)", ylab="Body Weight (kg)")
+```
+
+I made histogram, boxplot, and brain vs body plot after outlier elimination. The histogram and boxplot look better than before and looks like there is a positive correlation between brain weight and body weight. Special issue was not detected in the data.
+
+## (d) Tomato Data
+
+```{r Tomato import, coche=FALSE}
+## Tomato import
+url_Tomato <- "http://www2.isye.gatech.edu/~jeffwu/wuhamadabook/data/tomato.dat"
+Tomato_raw <- fread(url_Tomato)
+knitr::kable(Tomato_raw)
+```
+
+I imported data from the url. It looks like data is mess. It looks similar to kind of contingency table, i.e., yield results are in combination of density (10000, 20000, 30000) and Tomato kind (Ife#1, PusaEarlyDwarf). We should transform this data into data wich 3 columns (Tomato Kind, Density, Yield) and 18 observation.
+
+### Using Basic R Functions
+
+```{r}
+## Tomato data : old school : Transpose the data
+Tomato_old_school <- Tomato_raw
+
+Tomato_old_school <- as.data.frame(t(Tomato_old_school))
+
+colnames(Tomato_old_school) <- Tomato_old_school[1,]
+Tomato_old_school <- Tomato_old_school[-1,]
+Tomato_old_school[,3] <- rownames(Tomato_old_school)
+rownames(Tomato_old_school) <- 1:3
+
+head(Tomato_old_school)
+```
+
+First, for convenience, I transposed the data.
+
+```{r}
+## Tomato data : old school : Use strsplit and unlist function to separate yield values
+Tomato_old_school <- data.frame(
+  c(rep(colnames(Tomato_old_school)[1],9),rep(colnames(Tomato_old_school)[2],9)),
+  rep(c(rep(10000,3),rep(20000,3),rep(30000,3)),2),
+  as.numeric(c(unlist(strsplit(Tomato_old_school[1,1],",")), unlist(strsplit(Tomato_old_school[2,1],",")), unlist(strsplit(Tomato_old_school[3,1],",")),
+    unlist(strsplit(Tomato_old_school[1,2],",")), unlist(strsplit(Tomato_old_school[2,2],",")), unlist(strsplit(Tomato_old_school[3,2],","))))
+)
+
+colnames(Tomato_old_school) <- c("kind", "density", "yield")
+knitr::kable(Tomato_old_school)
+```
+
+I used strsplit and unlist function to split yield values in the same data point, and made data frame with these yield values, Tomato kinds, and density values. 
+
+### Using Tidyverse
+
+```{r}
+## Tomato data : tidyverse : Transpose the data
+Tomato_new <- Tomato_raw
+
+Tomato_new <- as.data.frame(t(Tomato_new))
+
+colnames(Tomato_new) <- Tomato_new[1,]
+Tomato_new <- Tomato_new[-1,]
+Tomato_new[,3] <- rownames(Tomato_new)
+rownames(Tomato_new) <- 1:3
+
+head(Tomato_new)
+```
+
+First, for convenience, I transposed the data.
+
+```{r}
+## Tomato data : tidyverse : use gather and separate_rows function
+Tomato_new <- gather(data=Tomato_new, key="kind", value="yield",`Ife\\#1`,`PusaEarlyDwarf`)
+Tomato_new <- Tomato_new %>% 
+  separate_rows(yield, sep=",")
+Tomato_new <-Tomato_new[-13,]
+Tomato_new <- Tomato_new %>% 
+  arrange(kind,V3)
+
+Tomato_new <- Tomato_new[,c(2,1,3)]
+
+colnames(Tomato_new)[2] <- "density"
+
+Tomato_new$yield=as.numeric(Tomato_new$yield)
+knitr::kable(Tomato_new)
+```
+
+I used gather function in tidyverse to make kind column. I used separate_rows function in tidyverse to split yield values in the same density, and arranged the data by kind and density. The result is as same as the previous result.
+
+### Data Description
+
+```{r}
+## Tomato data : Summary for yield in Ife\\#1 kind with density 10000
+knitr::kable(summary(Tomato_new %>% 
+                       subset(kind == "Ife\\#1"& density == 10000) %>% 
+                       select(yield))
+)
+```
+
+```{r}
+## Tomato data : Summary for yield in Ife\\#1 kind with density 20000
+knitr::kable(summary(Tomato_new %>% 
+                       subset(kind == "Ife\\#1"& density == 20000) %>% 
+                       select(yield))
+)
+```
+
+```{r}
+## Tomato data : Summary for yield in Ife\\#1 kind with density 30000
+knitr::kable(summary(Tomato_new %>% 
+                       subset(kind == "Ife\\#1"& density == 30000) %>% 
+                       select(yield))
+)
+```
+
+```{r}
+## Tomato data : Summary for yield in PusaEarlyDwarf kind with density 10000
+knitr::kable(summary(Tomato_new %>% 
+                       subset(kind == "PusaEarlyDwarf"& density == 10000) %>% 
+                       select(yield))
+)
+```
+
+```{r}
+## Tomato data : Summary for yield in PusaEarlyDwarf kind with density 20000
+knitr::kable(summary(Tomato_new %>% 
+                       subset(kind == "PusaEarlyDwarf"& density == 20000) %>% 
+                       select(yield))
+)
+```
+
+```{r}
+## Tomato data : Summary for yield in PusaEarlyDwarf kind with density 30000
+knitr::kable(summary(Tomato_new %>% 
+                       subset(kind == "PusaEarlyDwarf"& density == 30000) %>% 
+                       select(yield))
+)
+```
+
+```{r}
+## Tomato data : boxplot
+par(mfrow=c(2,3))
+boxplot(Tomato_new %>% 
+                       subset(kind == "Ife\\#1"& density == 10000) %>% 
+                       select(yield), ylab="yield", main=c("yield for Ife\\#1", "in density 10000")
+)
+
+boxplot(Tomato_new %>% 
+                       subset(kind == "Ife\\#1"& density == 20000) %>% 
+                       select(yield), ylab="yield", main=c("yield for Ife\\#1", "in density 20000")
+)
+
+boxplot(Tomato_new %>% 
+                       subset(kind == "Ife\\#1"& density == 30000) %>% 
+                       select(yield), ylab="yield", main=c("yield for Ife\\#1", "in density 30000")
+)
+
+boxplot(Tomato_new %>% 
+                       subset(kind == "PusaEarlyDwarf"& density == 10000) %>% 
+                       select(yield), ylab="yield", main=c("yield for PusaEarlyDwarf", "in density 10000")
+)
+
+boxplot(Tomato_new %>% 
+                       subset(kind == "PusaEarlyDwarf"& density == 20000) %>% 
+                       select(yield), ylab="yield", main=c("yield for PusaEarlyDwarf", "in density 20000")
+)
+
+boxplot(Tomato_new %>% 
+                       subset(kind == "PusaEarlyDwarf"& density == 30000) %>% 
+                       select(yield), ylab="yield", main=c("yield for PusaEarlyDwarf", "in density 30000")
+)
+```
+
+I summarized the Tomato data and plotted histogram and boxplot. Special issue was not detected in the data.
