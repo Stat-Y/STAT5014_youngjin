@@ -104,7 +104,7 @@ problem_5_a_func <- function(input_data){
 }
 
 problem_5_a <- problem_5_a_func(hw3_data)
-kable(problem_5_a)
+kable(problem_5_a, caption="summary statistics")
 ```
 I made a function to make summary data frame from orignial data. It works very well. In summary, dev 1 and dev 2 observed by each observers look very similar.
 
@@ -123,6 +123,7 @@ boxplot(problem_5_a$dev_1_sd, problem_5_a$dev_2_sd,
         horizontal = TRUE
         )
 ```
+
 I made boxplots. It is clear that the means of dev2 are much smaller than those of dev1. Also, sds of dev2 are much larger than those of dev1. It means that the values of dev2 are usually smaller than those of dev1 and they have more higher variability than those of dev1.
 
 ## (c)
@@ -147,11 +148,12 @@ ggplot(problem_5_c_sd, aes(x=as.character(dev), y=sd)) +
   ggtitle("Sd : dev 1 vs dev 2")
 ```
 
-I made violin plots. the conclusion of (c) is same as that of (b). But the violin plot looks not very good since the values of dev1 and dev2 are so much different.
+I made violin plots. the conclusion of (c) is same as that of (b). There is no big difference between box plot and violin plot since the violin plot does not look like shape of violin at all. The violin plot looks not very good since the values of dev1 and dev2 are so much different.
 
 # (d)
 ```{r, fig.height=4, fig.width=4}
-ggplot(hw3_data, aes(x=dev1,y=dev2)) + geom_point() + facet_wrap(Observer~.)
+ggplot(hw3_data, aes(x=dev1,y=dev2)) + geom_point() + facet_wrap(Observer~.) + 
+  ggtitle("Scatter plots for original data")
 ```
 
 Before making scatter plots. I thought that data is weird since summary statistics are similar for each observers. But after I made scatter plots, I found that it is a point (x,y) data for some drawings! When doing explanatory data analysis, we should draw a scatter plot for orignal data before making summary statistics.
@@ -174,14 +176,14 @@ given_func_int <- function(x){
   exp(-x^2/2)
 }
 ```
-I made function for the given function. It is standard normal pdf without multiplying $\frac{1}{\sqrt{2\pi}}$Now I will integrate it from 0 to 1 by using my own Riemann integration function.
+I made function for the given function $e^{-\frac{x^2}{2}}$. It is standard normal pdf without multiplying $\frac{1}{\sqrt{2\pi}}$. Now I will integrate this function from 0 to 1 by using my own Riemann integration function.
 
 
 ```{r}
-riemann_integral <- function(lb,ub,slice,fun){
+riemann_integral <- function(lb,ub,width,fun){
   
   # Sliced the given range
-  support <- seq(lb,ub,length=slice)
+  support <- seq(lb,ub,by=width)
   
   # Made midpoint vector from range
   midpoint_vector <- (support[-length(support)]+support[-1])/2
@@ -206,19 +208,19 @@ I made the function.
 ```{r}
 # Integral results for my function in different width levels.
 
-# 10 slices
-riemann_integral(0,1,10,given_func_int)
+# width : 0.1
+riemann_integral(0,1,0.1,given_func_int)
 
-# 100 slices
-riemann_integral(0,1,100,given_func_int)
+# width : 0.01
+riemann_integral(0,1,0.01,given_func_int)
 
-# 1000 slices
-riemann_integral(0,1,1000,given_func_int)
+# width : 0.001
+riemann_integral(0,1,0.001,given_func_int)
 
 # Exact result using pnorm.
 (pnorm(1)-pnorm(0))*sqrt(2*pi)
 ```
-We can see that my function with 1000 slices gives answer within $1e^{-6}$ of the analytical solution.
+We can see that my function with 0.001 slice width gives answer within $1e^{-6}$ of the analytical solution. 0.001 slice width is enough.
 
 ## Problem 7
 
@@ -389,7 +391,8 @@ I made SST function with for loop. The result of the function is the same as tru
 ### (b)
 ```{r}
 SST_b <- function(y){
-  SST <- t(y)%*%(diag(length(y))-matrix(1/length(y),length(y),length(y)))%*%y
+  centered_y <- y-mean(y)
+  SST <- t(centered_y)%*%centered_y
   return(SST)
 }
 
@@ -401,10 +404,10 @@ I made SST function with matrix equation. The result of the function is the same
 
 ```{r}
 library(microbenchmark)
-times<-microbenchmark(result1<-SST_a(y),result2<-SST_b(y),times = 100, unit = "ms")
+times<-microbenchmark(loop<-SST_a(y),matrix<-SST_b(y),times = 100, unit = "ms")
 times
 ```
-SST_a used for loop and SST_b used matrix equation. SST_a is much faster than SST_b.
+SST_a used for loop and SST_b used matrix equation. SST_b is faster than SST_a. Using matrix equation is better.
 
 ## Problem 9
 
