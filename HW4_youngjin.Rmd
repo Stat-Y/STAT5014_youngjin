@@ -1,0 +1,846 @@
+---
+title: "Homework 4"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+date: "`r Sys.Date()`"
+subtitle: Due October 14, 2020
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+For each assignment, turn in by the due date/time.  Late assignments must be arranged prior to submission.  In every case, assignments are to be typed neatly using proper English in Markdown.  
+
+The last couple of weeks, we spoke about vector/matrix operations in R, discussed how the apply family of functions can assist in row/column operations, and how parallel computing in R is enabled.  Combining this with previous topics, we can write functions using our Good Programming Practices style and adhere to Reproducible Research principles to create fully functional, redable and reproducible code based analysis in R.  In this homework, we will put this all together and actually analyze some data.  Remember to adhere to both Reproducible Research and Good Programming Practices, ie describe what you are doing and comment/indent code where necessary.  
+
+
+
+R Vector/matrix manipulations and math, speed considerations
+R's Apply family of functions
+Parallel computing in R, foreach and dopar
+
+## Problem 1: Using the dual nature to our advantage
+
+Sometimes using a mixture of true matrix math plus component operations cleans up our code giving better readibility.  Suppose we wanted to form the following computation:
+
+\begin{itemize}
+    \item $while(abs(\Theta_0^{i}-\Theta_0^{i-1}) \text{ AND } abs(\Theta_1^{i}-\Theta_1^{i-1}) > tolerance) \text{ \{ }$
+    \begin{eqnarray*}
+        \Theta_0^i &=& \Theta_0^{i-1} - \alpha\frac{1}{m}\sum_{i=1}^{m} (h_0(x_i) -y_i)  \\
+        \Theta_1^i &=& \Theta_1^{i-1} - \alpha\frac{1}{m}\sum_{i=1}^{m} ((h_0(x_i) -y_i)x_i) 
+    \end{eqnarray*}
+    $\text{ \} }$
+\end{itemize}
+
+Where $h_0(x) = \Theta_0 + \Theta_1x$.  
+
+Given $\mathbf{X}$ and $\vec{h}$ below, implement the above algorithm and compare the results with lm(h~0+$\mathbf{X}$).  State the tolerance used and the step size, $\alpha$.
+
+```{r eval=F, echo=T, include=T}
+    set.seed(1256)
+    theta <- as.matrix(c(1,2),nrow=2)
+    X <- cbind(1,rep(1:10,10))
+    h <- X%*%theta+rnorm(100,0,0.2)
+```
+
+```{r}
+set.seed(1256)
+theta <- as.matrix(c(1,2),nrow=2)
+# True Parameter
+theta
+X <- cbind(1,rep(1:10,10))
+h <- X%*%theta+rnorm(100,0,0.2)
+h_0 <- X%*%theta
+
+
+Dual <- function(theta,X,y,alpha,tol,maxiter){
+  # theta is initial value
+  up_theta <- theta
+  up_theta[1] <- theta[1]-alpha*mean(X%*%theta-y)
+  up_theta[2] <- theta[2]-alpha*t(X%*%theta-y)%*%X[,2]/nrow(X)
+  i <- 1
+  while (abs(up_theta[1]-theta[1])>tol & abs(up_theta[2]-theta[2])>tol & i<maxiter){
+    theta <- up_theta
+    up_theta[1] <- theta[1]-alpha*mean(X%*%theta-y)
+    up_theta[2] <- theta[2]-alpha*t(X%*%theta-y)%*%X[,2]/nrow(X)
+    i <- i+1
+  }
+  output <- c(i,up_theta)
+  names(output)=c("iteration", "theta_0_hat", "theta_1_hat")
+  return(output)
+}
+
+## Estimating parameter using regression
+regfit <- lm(h~0+X)
+regfit$coefficients
+# error
+sum((regfit$coefficients-theta)^2)
+
+# Estimating parameter using regression
+dualfit <- Dual(matrix(1,2,1),X,h,0.001,0.0001,10000)
+dualfit
+# error
+sum((dualfit[2:3]-theta)^2)
+```
+
+True model is $h=X\theta+\epsilon$, where $\theta=(1,2)^T$ and $\epsilon_i \overset{{iid}}{\sim}N(0,0.2^2)$. We want to estimate $\theta$ by two methods, where one is given algorithm in the problem and the other is linear regression. Both methods estimated true $\theta$ well, but the performance of regression is better than that of our algorithm. I think if we set proper initial value, step size($\alpha$), and tolerance level in the dual algorithm, we can get similar performance as linear regression.
+
+## Problem 2
+
+The above algorithm is called Gradient Descent.  This algorithm, like Newton's method, has "hyperparameters" that are determined outside the algorithm and there are no set rules for determing what settings to use.  For gradient descent, you need to set a start value, a step size and tolerance.  
+
+### Part a. Using a step size of $1e^{-7}$ and tolerance of $1e^{-9}$, try 10000 different combinations of start values for $\beta_0$ and $\beta_1$ across the range of possible $\beta$'s +/-1 from true determined in Problem 2, making sure to take advantages of parallel computing opportunities.  In my try at this, I found starting close to true took 1.1M iterations, so set a stopping rule for 5M.  Report the min and max number of iterations along with the starting values for those cases. Also report the average and stdev obtained across all 10000 $\beta$'s.
+
+```{r, fig.height=3, fig.width=3}
+# 10000 initial values
+grid <- seq(1,2,length=100)
+initial <- as.data.frame(rbind(cbind(grid,grid), t(combn(grid,2)), t(combn(grid,2))[,c(2,1)]))
+initial[,3:5]=0
+names(initial) <- c("Initial_theta_0", "Initial_theta_1", "iteration", "theta_0_hat", "theta_1_hat")
+head(initial)
+plot(initial[,1],initial[,2],pch=20)
+```
+
+I made 10000 initial values, which are grids for combination of $\theta_0^0 : 1 \sim 2$ and $\theta_1^0 : 1 \sim 2$.
+
+```{r, eval=FALSE}
+# Parallel computing for initial values
+library(foreach)
+library(doParallel)
+
+cores=detectCores()
+cl <- makeCluster(cores[1]-1)
+registerDoParallel(cl)
+chunk=foreach(i = 1:nrow(initial), .combine= 'rbind') %dopar% {
+  dualfit <- Dual(matrix(c(initial[i,1],initial[i,2]),2,1),X,h,0.1^7,0.1^9,5000000)
+  dualfit
+}
+stopCluster(cl)
+initial[,3:5]=chunk
+
+save.image(file="Homework_4_gradient.RData")
+```
+
+I performed gradient descent algorithm for 10000 initial values using parallel computing. Since the computation time is so long, I implemented above code in my R (It took many hours) and saved the result in Rdata file. I bring the Rdata file in the RMarkdown.
+
+```{r}
+setwd("~/")
+load("~/Homework_4_gradient.RData")
+
+# Minimum iterations
+initial[initial$iteration==1,]
+
+# Maximum iterations
+initial[initial$iteration==5000000,]
+```
+
+We can get initial values with the minimum and the maximum iterations. The minimum iterations is 1 and the maximum iterations is 5M. In the table, Initial_theta_0 and Initial_theta_1 columns are for initial values $(\theta_0^0,\theta_1^0)$ and iteration column is for the number of iterations in the algorithm, and theta_0_hat and theta_1_hat columns are for estimate $(\hat{\theta}_0, \hat{\theta}_1)$.
+
+```{r}
+# Mean and Sd for Theta_0_hat
+mean(initial$theta_0_hat)
+sd(initial$theta_0_hat)
+
+# Mean and Sd for Theta_1_hat
+mean(initial$theta_1_hat)
+sd(initial$theta_1_hat)
+```
+
+I got mean and standard deviation for estimates. estimates for $\theta_1$, which is the slope, are more accurate and have less variations than those of $\theta_0$, which is intercept.
+
+### Part b. What if you were to change the stopping rule to include our knowledge of the true value?  Is this a good way to run this algorithm?  What is a potential problem?
+
+I think it is inappropriate. The potential problem is we do not know the true value of parameters. Therefore we cannot use it in the stopping criteria of the algorithm. Of course, if we know true values of parameters and use it in the stopping criteria, it will enhance the result.
+
+
+### Part c. What are your thoughts on this algorithm?
+
+I think this algorithm is good but we should choose initial values, step size, and tolerance carefully.
+
+## Problem 3: Inverting matrices
+
+Ok, so John Cook makes some good points, but if you want to do:
+
+\begin{equation*}
+\hat\beta = (X'X)^{-1}X'\underline{y}
+\end{equation*}
+
+what are you to do??  Can you explain what is going on?
+
+I will use solve function on $X'X$ to get $(X'X)^{-1}$. I will also use %*% to do multiplication between matrices. The r code is like below.
+
+```{r, eval=FALSE}
+solve(t(X)%*%X)%*%t(X)%*%y
+```
+
+## Problem 4: Need for speed challenge
+
+In this problem, we are looking to compute the following:
+
+\begin{equation}
+y = p + A B^{-1} (q - r)
+\end{equation}
+
+Where A, B, p, q and r are formed by:
+
+```{r}
+    set.seed(12456) 
+    
+    G <- matrix(sample(c(0,0.5,1),size=16000,replace=T),ncol=10)
+    R <- cor(G) # R: 10 * 10 correlation matrix of G
+    C <- kronecker(R, diag(1600)) # C is a 16000 * 16000 block diagonal matrix
+    id <- sample(1:16000,size=932,replace=F)
+    q <- sample(c(0,0.5,1),size=15068,replace=T) # vector of length 15068
+    A <- C[id, -id] # matrix of dimension 932 * 15068
+    B <- C[-id, -id] # matrix of dimension 15068 * 15068
+    p <- runif(932,0,1)
+    r <- runif(15068,0,1)
+    C<-NULL #save some memory space
+```
+
+### Part a. How large (bytes) are A and B?  Without any optimization tricks, how long does the it take to calculate y?  
+
+```{r}
+# Size of the matrices
+object.size(A)
+object.size(B)
+```
+
+Size of A is 112347224 bytes and size of B is 1816357208 bytes. Time is calculated like this.
+
+
+### Part b. How would you break apart this compute, i.e., what order of operations would make sense?  Are there any mathmatical simplifications you can make?  Is there anything about the vectors or matrices we might take advantage of?
+
+Since B is positive definite, We can use Cholesky decomposition and Cholesky inverse to substitute solve function. We can also use qr inverse function. It is known that Cholesky decomposition and cholesky inverse is faster than solve function in high dimensional matrices.
+
+### Part c. Use ANY means (ANY package, ANY trick, etc) necessary to compute the above, fast.  Wrap your code in "system.time({})", everything you do past assignment "C <- NULL".
+
+```{r, eval=FALSE}
+set.seed(12456) 
+
+G <- matrix(sample(c(0,0.5,1),size=16000,replace=T),ncol=10)
+R <- cor(G) # R: 10 * 10 correlation matrix of G
+C <- kronecker(R, diag(1600)) # C is a 16000 * 16000 block diagonal matrix
+id <- sample(1:16000,size=932,replace=F)
+q <- sample(c(0,0.5,1),size=15068,replace=T) # vector of length 15068
+A <- C[id, -id] # matrix of dimension 932 * 15068
+B <- C[-id, -id] # matrix of dimension 15068 * 15068
+p <- runif(932,0,1)
+r <- runif(15068,0,1)
+C<-NULL #save some memory space
+
+# Calculation time
+system.time_solve <- system.time(y <- p+A%*%solve(B)%*%(q-r))
+system.time_qr <- system.time(y <- p+A%*%qr.solve(B)%*%(q-r))
+system.time_chol <- system.time(y_new <- p+A%*%chol2inv(chol(B))%*%(q-r))
+
+save.image(file="Homework_4_inverse.RData")
+```
+
+Since the computation time is so long, I implemented above code in my R (It took many hours) and saved the result in Rdata file. I bring the Rdata file in the RMarkdown.
+
+```{r}
+setwd("~/")
+load("~/Homework_4_inverse.RData")
+
+# Time Comparison between methods
+system.time_solve
+system.time_qr
+system.time_chol
+```
+
+We can see that solve function is faster than cholsky inverse or qr inverse function. I think solve function is the best.
+
+## Problem 5  
+
+### a. Create a function that computes the proportion of successes in a vector.  Use good programming practices.
+
+```{r}
+compute_success_prob <- function(x){
+  success_prob <- mean(x) # mean of binary data is proportion of success
+  return(success_prob)
+}
+```
+
+### b. Create a matrix to simulate 10 flips of a coin with varying degrees of "fairness" (columns = probability) as follows:
+
+```{r}
+    set.seed(12345)
+    P4b_data <- matrix(rbinom(10, 1, prob = (31:40)/100), nrow = 10, ncol = 10, byrow = FALSE)
+```
+
+### c. Use your function in conjunction with apply to compute the proportion of success in P4b_data by column and then by row.  What do you observe?  What is going on?
+
+```{r}
+# Success by column
+apply(P4b_data, 2, compute_success_prob)
+
+# Success by row
+apply(P4b_data, 1, compute_success_prob)
+```
+
+I found that row-wise proportion is 1 or 0 and column-wise plot is 0.6. The original data duplicates one column in every other columns.
+
+### d. You are to fix the above matrix by creating a function whose input is a probability and output is a vector whose elements are the outcomes of 10 flips of a coin.  Now create a vector of the desired probabilities.  Using the appropriate apply family function, create the matrix we really wanted above.  Prove this has worked by using the function created in part a to compute and tabulate the appropriate marginal successes.
+
+```{r}
+binom_random <- function(given_prob){
+  rbinom(10, 1, prob = given_prob)
+}
+
+P4b_data_new <- sapply(30:40/100,binom_random)
+P4b_data_new
+```
+
+I made an appropriate matrix.
+
+```{r}
+# Success by column
+apply(P4b_data_new, 2, compute_success_prob)
+```
+
+We can see that proportion of columns are similar to (0.30,0.31,0.32,0.33,0.34,0.35,0.36,0.37,0.38,0.39,0.40) in order, which is the parameter for each column data. 
+
+```{r}
+# Success by row
+apply(P4b_data_new, 1, compute_success_prob)
+```
+
+We can see that proportion of rows have no pattern, which is appropriate.
+
+## Problem 6
+
+In Homework 3, we had a dataset we were to compute some summary statistics from. The description of the data was given as "a dataset which has multiple repeated measurements from two devices by thirteen Observers".  Where the device measurements were in columns "dev1" and "dev2".  Reimport that dataset, change the names of "dev1" and "dev2" to x and y and do the following:
+
+\begin{enumerate}
+  \item create a function that accepts a dataframe of values, title, and x/y labels and creates a scatter plot
+  \item use this function to create:
+  \begin{enumerate}
+    \item a single scatter plot of the entire dataset
+    \item a seperate scatter plot for each observer (using the apply function)
+  \end{enumerate}
+\end{enumerate}
+
+```{r, fig.height=3, fig.width=3}
+# Import data
+setwd("C:/Users/User/Downloads")
+hw3_data <- readRDS("HW3_data.rds")
+names(hw3_data)=c("Observer","x","y")
+head(hw3_data)
+
+# Function
+plot_HW3_data <- function(Data){
+  plot(Data[,2],Data[,3], xlab="x", ylab="y", main="Scatter plot")
+}
+
+# Plot all data
+plot_HW3_data(hw3_data)
+
+# Plot by observers
+by(hw3_data,hw3_data[,1],plot_HW3_data)
+```
+
+
+## Problem 7
+
+Our ultimate goal in this problem is to create an annotated map of the US.  I am giving you the code to create said map, you will need to customize it to include the annotations.
+
+### Part a. Get and import a database of US cities and states.  Here is some R code to help:
+
+```{r}
+#we are grabbing a SQL set from here
+# http://www.farinspace.com/wp-content/uploads/us_cities_and_states.zip
+#download the files, looks like it is a .zip
+#library(downloader)
+#download("http://www.farinspace.com/wp-content/uploads/us_cities_and_states.zip",dest="us_cities_states.zip")
+#unzip("us_cities_states.zip")
+
+#read in data, looks like sql dump, blah
+library(data.table)
+states <- fread(input = "./us_cities_and_states/cities_extended.sql",skip = 23,sep = "'", sep2 = ",", header = F, select = c(2,4))
+states_2 <- fread(input = "./us_cities_and_states/states.sql",skip = 23,sep = "'", sep2 = ",", header = F, select = c(2,4))
+states_2$V2 <- tolower(states_2$V2)
+
+### YOU do the CITIES
+### I suggest the cities_extended.sql may have everything you need
+### can you figure out how to limit this to the 50?
+head(states)
+head(states_2)
+```
+
+Imported the data.
+
+### Part b. Create a summary table of the number of cities included by state.
+
+```{r}
+# Method 1
+summary(as.factor(states$V4))
+
+# Method 2
+library(dplyr)
+states %>%
+  group_by(V4) %>%
+  tally()
+```
+
+I think both methods are useful.
+
+### Part c. Create a function that counts the number of occurances of a letter in a string.  The input to the function should be "letter" and "state_name".  The output should be a scalar with the count for that letter. Create a for loop to loop through the state names imported in part a.  Inside the for loop, use an apply family function to iterate across a vector of letters and collect the occurance count as a vector.
+
+```{r}
+library(stringr)
+
+# Letter finding function
+letter_finder <- function(state,letter){
+  sum(str_count(states_2[states_2$V4==state]$V2,letter))
+}
+```
+
+I made a function.
+
+```{r}
+# Table
+counted_table <- as.data.frame(matrix(NA,length(summary(as.factor(states$V4))),26))
+row.names(counted_table) <- names(summary(as.factor(states$V4)))
+names(counted_table) <- c("a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q","r","s","t","u","v","w","x","y","z")
+
+# Loop
+for (i in 1:nrow(counted_table)){
+  counted_table[i,] <- mapply(letter_finder,row.names(counted_table)[i],names(counted_table))
+}
+counted_table
+```
+
+I found letters by states easily by mapply and for loop.
+
+### Part d. Create 2 maps to finalize this.  Map 1 should be colored by count of cities on our list within the state.  Map 2 should highlight only those states that have more than 3 occurances of ANY letter in thier name.
+
+
+```{r}
+library(ggplot2)  
+library(maps)
+library(dplyr)
+
+State_Abb <- states_2
+names(State_Abb) <- c("region", "abb")
+
+MainStates <- map_data("state")
+MainStates <- left_join(MainStates,State_Abb,by='region')
+
+city_count <- as.data.frame(summary(as.factor(states$V4)))
+city_count$region <- rownames(city_count)
+names(city_count) <- c("city_count","abb")
+
+a_count <- data.frame(counted_table[,1],rownames(counted_table))
+names(a_count) <- c("a_count","abb")
+
+MainStates <- left_join(MainStates,city_count,by='abb')
+MainStates <- left_join(MainStates,a_count,by='abb')
+MainStates$a_3 <- as.numeric(MainStates$a_count>3)
+head(MainStates)
+
+
+# Map 1 : Plot by city count
+ggplot() + geom_polygon( data=MainStates, 
+                         aes(x=long, y=lat, group=group, fill = city_count), 
+                         color="white", size = 0.2) 
+
+# Map 2 : Plot highlighted states with letter "a" appears more than 3 times in its name
+ggplot() + geom_polygon( data=MainStates, 
+                         aes(x=long, y=lat, group=group, fill = a_3), 
+                         color="white", size = 0.2) 
+```
+
+
+## Problem 8
+
+Bootstrapping
+
+Recall the sensory data from five operators:    
+<http://www2.isye.gatech.edu/~jeffwu/wuhamadabook/data/Sensory.dat> 
+
+Sometimes, you really want more data to do the desired analysis, but going back to the "field" is often not an option. An often used method is bootstrapping.  Check out the second answer here for a really nice and detailed description of bootstrapping:
+<https://stats.stackexchange.com/questions/316483/manually-bootstrapping-linear-regression-in-r>.
+
+What we want to do is bootstrap the Sensory data to get non-parametric estimates of the parameters.  Assume that we can neglect item in the analysis such that we are really only interested in a linear model lm(y~operator).
+
+### Part a.  First, the question asked in the stackexchange was why is the supplied code not working.  This question was actually never answered.  What is the problem with the code?  If you want to duplicate the code to test it, use the quantreg package to get the data.
+
+```{r}
+library(quantmod)
+#1)fetch data from Yahoo
+#AAPL prices
+apple08 <- getSymbols('AAPL', auto.assign = FALSE, from = '2008-1-1', to = 
+                        "2008-12-31")[,6]
+#market proxy
+rm08<-getSymbols('^ixic', auto.assign = FALSE, from = '2008-1-1', to = 
+                   "2008-12-31")[,6]
+
+#log returns of AAPL and market
+logapple08<- na.omit(ROC(apple08)*100)
+logrm08<-na.omit(ROC(rm08)*100)
+
+#OLS for beta estimation
+beta_AAPL_08<-summary(lm(logapple08~logrm08))$coefficients[2,1]
+
+
+
+
+#create df from AAPL returns and market returns
+df08<-cbind(logapple08,logrm08)
+set.seed(777)
+Boot_times=1000
+sd.boot=rep(0,Boot_times)
+for(i in 1:Boot_times){
+  # nonparametric bootstrap
+  bootdata=df08[sample(nrow(df08), size = 251, replace = TRUE),]
+  names(bootdata)=c("logapple08","logrm08")
+  sd.boot[i]= coef(summary(lm(logapple08~logrm08, data = bootdata)))[2,2]
+}
+
+#after fix
+sd.boot[1:10]
+```
+
+I inserted $names(bootdata)=c("logapple08","logrm08")$ in the for loop. The problem with this code is column names for bootdata were not "logapple08" and "logrm08". So sd.boot was calculated with same original logapple08 and logrm08 variables over and over. After my fix, We can see that bootstrap works fine. No same results for bootstrap samples.
+
+### Part b. Bootstrap the analysis to get the parameter estimates using 100 bootstrapped samples.  Make sure to use system.time to get total time for the analysis. You should probably make sure the samples are balanced across operators, ie each sample draws for each operator.
+
+```{r}
+library(tidyr)
+
+## Sensory Import
+url_Sensory <- "http://www2.isye.gatech.edu/~jeffwu/wuhamadabook/data/Sensory.dat"
+Sensory_raw <- fread(url_Sensory, fill=TRUE, data.table = FALSE, skip=1)
+knitr::kable(head(Sensory_raw))
+
+## Sensory data : tidyverse : dividing data
+Sensory_new <- cbind(1:length(Sensory_raw[,6]),Sensory_raw)
+colnames(Sensory_new) <- c("number_key","trash",paste("Operator", 1:5))
+
+Sensory_A <- Sensory_new %>% 
+  subset(is.na(Sensory_new[,7]))
+
+Sensory_B <- Sensory_new %>% 
+  subset(Sensory_new[,7]>0)
+
+Sensory_A <- Sensory_A[,-7]
+Sensory_B <- Sensory_B[,-2]
+
+## Sensory data : tidyverse : combining data
+colnames(Sensory_A) <- colnames(Sensory_B)
+Sensory_new <- rbind(Sensory_A,Sensory_B)
+Sensory_new <- Sensory_new %>% 
+  arrange(number_key) %>% 
+  select(-1)
+knitr::kable(head(Sensory_new))
+colnames(Sensory_new)=1:5
+
+Sensory_tidy <- gather(data=Sensory_new,key="Operator",value="value",)
+head(Sensory_tidy)
+```
+
+I imported the data and refined it.
+
+```{r}
+# Bootstrap Regression
+
+set.seed(777)
+
+Sensory_tidy_1 <- Sensory_tidy[Sensory_tidy$Operator=="1",]
+Sensory_tidy_2 <- Sensory_tidy[Sensory_tidy$Operator=="2",]
+Sensory_tidy_3 <- Sensory_tidy[Sensory_tidy$Operator=="3",]
+Sensory_tidy_4 <- Sensory_tidy[Sensory_tidy$Operator=="4",]
+Sensory_tidy_5 <- Sensory_tidy[Sensory_tidy$Operator=="5",]
+
+
+bootstrap_estimate <- data.frame(matrix(NA,100,4))
+colnames(bootstrap_estimate) <- c("2 vs 1", "3 vs 1", "4 vs 1", "5 vs 1")
+
+# System Time for Bootstrap
+system.time(
+  for (i in 1:100){
+    bootsample <- rbind(Sensory_tidy_1[sample(nrow(Sensory_tidy_1),nrow(Sensory_tidy_1),replace=TRUE),],
+                        Sensory_tidy_2[sample(nrow(Sensory_tidy_2),nrow(Sensory_tidy_2),replace=TRUE),],
+                        Sensory_tidy_3[sample(nrow(Sensory_tidy_3),nrow(Sensory_tidy_3),replace=TRUE),],
+                        Sensory_tidy_4[sample(nrow(Sensory_tidy_4),nrow(Sensory_tidy_4),replace=TRUE),],
+                        Sensory_tidy_5[sample(nrow(Sensory_tidy_5),nrow(Sensory_tidy_5),replace=TRUE),])
+    bootstrap_estimate[i,] <- summary(lm(value~Operator,data=bootsample))$coefficients[2:5,1]
+  }
+)
+
+head(bootstrap_estimate)
+
+# Regression Estimate
+summary(lm(value~Operator,data=Sensory_tidy))$coefficients[2:5,1]
+
+# Bootstrap Regression estimate
+apply(bootstrap_estimate,2,mean)
+```
+
+Bootstrap estimate and original estimate are quite similar.
+
+### Part c. Redo the last problem but run the bootstraps in parallel (`cl <- makeCluster(8)`), don't forget to `stopCluster(cl)`).  Why can you do this?  Make sure to use system.time to get total time for the analysis.
+
+Create a single table summarizing the results and timing from part a and b.  What are your thoughts?
+
+```{r}
+library(foreach)
+library(doParallel)
+
+boots_reg=function(){
+  bootsample <- rbind(Sensory_tidy_1[sample(nrow(Sensory_tidy_1),nrow(Sensory_tidy_1),replace=TRUE),],
+                      Sensory_tidy_2[sample(nrow(Sensory_tidy_2),nrow(Sensory_tidy_2),replace=TRUE),],
+                      Sensory_tidy_3[sample(nrow(Sensory_tidy_3),nrow(Sensory_tidy_3),replace=TRUE),],
+                      Sensory_tidy_4[sample(nrow(Sensory_tidy_4),nrow(Sensory_tidy_4),replace=TRUE),],
+                      Sensory_tidy_5[sample(nrow(Sensory_tidy_5),nrow(Sensory_tidy_5),replace=TRUE),])
+  return(summary(lm(value~Operator,data=bootsample))$coefficients[2:5,1])
+}
+
+boots_reg()
+
+cl <- makeCluster(8)
+registerDoParallel(cl)
+
+# System Time for Bootstrap (foreach)
+system.time(
+  bootstrap_foreach_estimate <- foreach(i = 1:100, .combine= 'rbind') %dopar% {
+    boots_reg()
+  }
+)
+
+colnames(bootstrap_foreach_estimate) <- c("2 vs 1", "3 vs 1", "4 vs 1", "5 vs 1")
+
+stopCluster(cl)
+
+head(bootstrap_foreach_estimate)
+
+# Regression Estimate
+summary(lm(value~Operator,data=Sensory_tidy))$coefficients[2:5,1]
+
+# Bootstrap Regression estimate (foreach)
+apply(bootstrap_foreach_estimate,2,mean)
+```
+
+As bootstrap sampling does not affect each others, we can use foreach, which makes computation faster. We can see that bootstrap by foreach is faster than bootstrap by for loop.
+
+## Problem 9
+
+Newton's method gives an answer for a root.  To find multiple roots, you need to try different starting values. There is no guarantee for what start will give a specific root, so you simply need to try multiple. From the plot of the function in HW3, problem 8, how many roots are there?
+
+Create a vector (`length.out=1000`) as a "grid" covering all the roots and extending +/-1 to either end.
+
+```{r}
+given_func <- function(x){3^x-sin(x)+cos(5*x)}
+given_func_derivative <- function(x){log(3)*3^x-cos(x)-5*sin(5*x)}
+```
+
+```{r}
+interval_1 <- seq(-40,0,length=1000)
+interval_2 <- seq(-20,0,length=1000)
+interval_3 <- seq(-10,0,length=1000)
+interval_4 <- seq(-5,0,length=1000)
+
+par(mfrow=c(2,2))
+plot(interval_1,given_func(interval_1),type="l", lwd=1, col="blue",main="f(x) for x in (-40,0)", xlab="x", ylab="f(x)")
+abline(h=0, col="red", lwd=1)
+plot(interval_2,given_func(interval_2),type="l", lwd=1, col="blue",main="f(x) for x in (-20,0)", xlab="x", ylab="f(x)")
+abline(h=0, col="red", lwd=1)
+plot(interval_3,given_func(interval_3),type="l", lwd=1, col="blue",main="f(x) for x in (-10,0)", xlab="x", ylab="f(x)")
+abline(h=0, col="red", lwd=1)
+plot(interval_4,given_func(interval_4),type="l", lwd=1, col="blue",main="f(x) for x in (-5,0)", xlab="x", ylab="f(x)")
+abline(h=0, col="red", lwd=1)
+```
+
+There are so many solutions.
+
+### Part a.  Using one of the apply functions, find the roots noting the time it takes to run the apply function.
+
+```{r}
+newton_for_given_func <- function(initial,max_iter,tolerance,lower_bound,upper_bound){
+  
+  # "initial" is initial value for the algorithm.
+  # "max_iter" is maximum value for interation.
+  # "tolerance" is minimum tolerance for absolute error in the solution.
+  # "lower_bound" and "upper_bound" are lower and upper bound for the values. 
+  # If initial value is out of the boundary, the algorithm will give null values with warning message. 
+  # Also, If the solution of the algorithm is out of the boundary, there will be warning message.
+  
+  # Warning message and null output for initial value out of the boundary.
+  
+  if(initial<lower_bound | initial>upper_bound)
+  {warning("Initial value should be included in (lower_bound, upper_bound)") 
+    return(NA)}
+
+  # Set iteration value and values vector. outputs will be stored in values vector.
+  iter <- 1
+  values <- numeric(max_iter)
+  values[1] <- initial
+  
+  # first iteration should be completed.
+  values[2] <- values[1]-given_func(values[1])/given_func_derivative(values[1])
+  iter <- 2
+  
+  # the other iterations.
+  # If the iteration reaches max iteration or absolute error is less than tolerance, 
+  # the algorithm stops.
+  while ( (iter<max_iter) && (abs(values[iter]-values[iter-1])>=tolerance) ){
+    values[iter+1] <- values[iter]-given_func(values[iter])/given_func_derivative(values[iter])
+    iter <- iter+1
+  }
+  
+  # Plotting absolute errors for iterations. 
+  # The algorithm stops when the error reaches the tolerance or iteration reaches the max iteration.
+  #plot(2:iter,abs(values[2:iter]-values[1:iter-1]),type="l",lwd=2, col="blue", 
+       #main="Absolute Error by Iteration", xlab="Iteration", ylab="Absolute Error")
+  #abline(h=tolerance,lwd=2,col="red")
+  
+  # Algorithm gives below list as a result.
+  result <- list(values[iter],iter,abs(values[iter]-values[iter-1]), given_func(values[iter]))
+  names(result) <- c("Solution", "The Number of Iterations", "Absolute Error", "f(x)")
+  
+  # Warning message for iteration reaches max iteration.
+  if(iter==max_iter) 
+    {warning("The algorithm did not converged during iterations.")}
+  
+  # Warning message for the solution outside of the boundary.
+  if(values[iter]<lower_bound | values[iter]>upper_bound) 
+    {warning("The solution is out of the boundary.")}
+  return(result)
+}
+
+newton_only_solution <- function(initial,max_iter,tolerance,lower_bound,upper_bound){
+  result <- newton_for_given_func(initial,max_iter,tolerance,lower_bound,upper_bound)
+  return(as.numeric(result[1]))
+}
+
+newton_only_solution_one_argument <- function(initial){
+  
+  given_func <- function(x){3^x-sin(x)+cos(5*x)}
+  given_func_derivative <- function(x){log(3)*3^x-cos(x)-5*sin(5*x)}
+  
+  max_iter=1000
+  tolerance=0.1^10
+  lower_bound=-Inf
+  upper_bound=Inf
+  
+  # "initial" is initial value for the algorithm.
+  # "max_iter" is maximum value for interation.
+  # "tolerance" is minimum tolerance for absolute error in the solution.
+  # "lower_bound" and "upper_bound" are lower and upper bound for the values. 
+  # If initial value is out of the boundary, the algorithm will give null values with warning message. 
+  # Also, If the solution of the algorithm is out of the boundary, there will be warning message.
+  
+  # Warning message and null output for initial value out of the boundary.
+  
+  if(initial<lower_bound | initial>upper_bound)
+  {warning("Initial value should be included in (lower_bound, upper_bound)") 
+    return(NA)}
+  
+  # Set iteration value and values vector. outputs will be stored in values vector.
+  iter <- 1
+  values <- numeric(max_iter)
+  values[1] <- initial
+  
+  # first iteration should be completed.
+  values[2] <- values[1]-given_func(values[1])/given_func_derivative(values[1])
+  iter <- 2
+  
+  # the other iterations.
+  # If the iteration reaches max iteration or absolute error is less than tolerance, 
+  # the algorithm stops.
+  while ( (iter<max_iter) && (abs(values[iter]-values[iter-1])>=tolerance) ){
+    values[iter+1] <- values[iter]-given_func(values[iter])/given_func_derivative(values[iter])
+    iter <- iter+1
+  }
+  
+  # Plotting absolute errors for iterations. 
+  # The algorithm stops when the error reaches the tolerance or iteration reaches the max iteration.
+  #plot(2:iter,abs(values[2:iter]-values[1:iter-1]),type="l",lwd=2, col="blue", 
+       #main="Absolute Error by Iteration", xlab="Iteration", ylab="Absolute Error")
+  #abline(h=tolerance,lwd=2,col="red")
+  
+  # Algorithm gives below list as a result.
+  result <- list(values[iter],iter,abs(values[iter]-values[iter-1]), given_func(values[iter]))
+  names(result) <- c("Solution", "The Number of Iterations", "Absolute Error", "f(x)")
+  
+  # Warning message for iteration reaches max iteration.
+  if(iter==max_iter) 
+  {warning("The algorithm did not converged during iterations.")}
+  
+  # Warning message for the solution outside of the boundary.
+  if(values[iter]<lower_bound | values[iter]>upper_bound) 
+  {warning("The solution is out of the boundary.")}
+  
+  return(as.numeric(result[1]))
+}
+```
+
+In last HW, I made function to get solution from $f(x)$ using Newton's Method.
+
+```{r}
+# Time to find multiple solutions
+time_newton <- system.time(
+  solutions <- mapply(newton_only_solution,seq(-3,3,length=20),max_iter=1000,tolerance=0.1^10,lower_bound=-Inf,upper_bound=Inf)
+)
+time_newton
+
+# Initial values and their solutions
+result_newton <- data.frame(seq(-3,3,length=20),solutions)
+names(result_newton) <- c("initial","solution")
+result_newton
+```
+
+I used mapply function rather than apply function since there are many arguments in my function. 
+
+### Part b.  Repeat the apply command using the equivelant parApply command.  Use 8 workers.  `cl <- makeCluster(8)`.
+
+
+```{r}
+library(parallel)
+library(doParallel)
+
+cl <- makeCluster(8)
+registerDoParallel(cl)
+
+# Time to find multiple solutions in parallel computing
+time_newton_par <- system.time(
+  solutions_par <- parSapply(cl,seq(-3,3,length=20),newton_only_solution_one_argument)
+)
+
+stopCluster(cl)
+
+time_newton_par
+
+# Initial values and their solutions in parallel computing
+result_newton_par <- data.frame(seq(-3,3,length=20),solutions_par)
+names(result_newton_par) <- c("initial","solution")
+result_newton_par
+```
+
+I did the same thing using parSapply.
+
+Create a table summarizing the roots and timing from both parts a and b.  What are your thoughts?
+
+```{r}
+result_compare <- cbind(result_newton,result_newton_par[,2])
+names(result_compare) <- c("initial","solution", "solution (par)")
+time_compare <- rbind(time_newton,time_newton_par)
+time_compare <- time_compare[,1:3]
+
+library(knitr)
+
+kable(result_compare)
+kable(time_compare)
+```
+
+I think computation result is same but b (parallel computing) is faster than a.
+
+## Problem 10
+
+Finish this homework by pushing your changes to your repo.
+
+**Only submit the .Rmd and .pdf solution files.  Names should be formatted HW4_pid.Rmd and HW4_pid.pdf**
