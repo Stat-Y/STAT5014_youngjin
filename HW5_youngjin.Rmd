@@ -134,7 +134,7 @@ diagnotistics <- function(lmfit, reg_data){
   abline(h=-2)
 
   qqnorm(lmfit$residuals, xlab="Quantile",ylab="Residual",main="")
-  abline(0,1)
+  qqline(lmfit$residuals)
 
   plot(lmfit$fitted.values,reg_data$UIS.NERA.2,xlab="Predicted Value", ylab=colnames(reg_data)[1])
   abline(0,1)
